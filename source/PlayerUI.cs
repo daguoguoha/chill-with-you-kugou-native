@@ -10,7 +10,7 @@ namespace ChillKuGouPlaylist
         Font font;
         GUISkin panelSkin;
         readonly List<Texture2D> uiTextures = new List<Texture2D>();
-        GUIStyle titleText, headingText, bodyText, mutedText, smallText, accentText;
+        GUIStyle titleText, headingText, bodyText, mutedText, smallText, accentText, statusText;
         GUIStyle windowStyle, sidebarStyle, cardStyle, rowStyle, selectedStyle;
         GUIStyle buttonStyle, quietButton, primaryButton, inputStyle, badgeText;
         string selectedPlaylistId;
@@ -80,6 +80,7 @@ namespace ChillKuGouPlaylist
             bodyText = TextStyle(16, ink, false);
             mutedText = TextStyle(14, muted, false);
             smallText = TextStyle(12, muted, false);
+            statusText = TextStyle(12, muted, false); statusText.wordWrap = true; statusText.alignment = TextAnchor.UpperLeft;
             accentText = TextStyle(15, accent, true);
             badgeText = TextStyle(12, accent, false); badgeText.alignment = TextAnchor.MiddleRight;
             windowStyle = BoxStyle(new Color(0.065f, 0.085f, 0.13f, 0.99f));
@@ -319,7 +320,7 @@ namespace ChillKuGouPlaylist
         void DrawPlayer()
         {
             GUI.Box(new Rect(20, 583, 960, 87), "", cardStyle);
-            GUI.Label(new Rect(40, 598, 680, 29), "酷狗音乐歌曲已接入游戏原生播放器", bodyText);
+            GUI.Label(new Rect(40, 598, 680, 29), "使用游戏原生播放器播放酷狗歌曲", bodyText);
             if (GUI.Button(new Rect(40, 631, 230, 30), showLauncher.Value ? "隐藏游戏内入口" : "显示游戏内入口", quietButton))
             {
                 showLauncher.Value = !showLauncher.Value;
@@ -327,7 +328,7 @@ namespace ChillKuGouPlaylist
             }
             GUI.Label(new Rect(286, 636, 420, 24), "隐藏后仍可按 F10 打开面板", mutedText);
             if (GUI.Button(new Rect(750, 604, 210, 40), "收起并使用原生播放器", primaryButton)) visible = false;
-            Label(new Rect(30, 675, 938, 17), status, smallText);
+            GUI.Label(new Rect(30, 671, 938, 28), new GUIContent(status, status), statusText);
         }
         void DisposeUI()
         {

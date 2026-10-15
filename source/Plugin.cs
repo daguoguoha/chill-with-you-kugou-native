@@ -15,7 +15,7 @@ using UnityEngine.Networking;
 
 namespace ChillKuGouPlaylist
 {
-    [BepInPlugin("local.chill.kugouplaylist", "酷狗音乐歌单", "1.0.0")]
+    [BepInPlugin("local.chill.kugouplaylist", "酷狗音乐歌单", "1.0.1")]
     [BepInProcess("Chill With You.exe")]
     public sealed partial class Plugin : BaseUnityPlugin
     {
@@ -154,6 +154,7 @@ namespace ChillKuGouPlaylist
         void Login()
         {
             qrPolling = false; ClearQr();
+            status = "正在获取登录二维码，连接失败时自动重试一次…";
             Run(delegate { Bridge.CancelQr(); return Bridge.QrImage(loginType); }, delegate(object result)
             {
                 byte[] png = Convert.FromBase64String((string)result);
