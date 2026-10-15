@@ -1,0 +1,4 @@
+**/account/
+**/*.log
+**/cache/
+**/installer-tests-*/
