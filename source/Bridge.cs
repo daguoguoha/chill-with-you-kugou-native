@@ -17,6 +17,14 @@ namespace ChillKuGouPlaylist
     {
         const string AppId = "1005", ClientVersion = "20489";
         static string directory, mid, qrKey;
+        static DateTime restrictedUntil=DateTime.MinValue;
+        static readonly object requestGate=new object();
+        static readonly System.Diagnostics.Stopwatch requestClock=System.Diagnostics.Stopwatch.StartNew();
+        static long nextRequestAt;
+        public static int RetryAfterSeconds {get{return Math.Max(0,(int)Math.Ceiling((restrictedUntil-DateTime.UtcNow).TotalSeconds));}}
+        static RequestIssue Fail(RequestIssue issue){if(issue.WaitSeconds>0)restrictedUntil=DateTime.UtcNow.AddSeconds(issue.WaitSeconds);return issue;}
+        static void Throttle()
+        {lock(requestGate){long wait=nextRequestAt-requestClock.ElapsedMilliseconds;if(wait>0)System.Threading.Thread.Sleep((int)Math.Min(wait,400));nextRequestAt=requestClock.ElapsedMilliseconds+400;}}
         static JObject account = new JObject();
         static readonly Dictionary<string, Song> knownSongs = new Dictionary<string, Song>();
         static string Text(JToken t) { return t == null || t.Type == JTokenType.Null ? "" : t.ToString(); }
@@ -33,6 +41,7 @@ namespace ChillKuGouPlaylist
         public static int Init(string path)
         {
             NetworkErrors.EnableModernTls();
+            account=new JObject();restrictedUntil=DateTime.MinValue;
             directory = path; Directory.CreateDirectory(path);
             string device = Path.Combine(path, "device.txt");
             mid = File.Exists(device) ? File.ReadAllText(device).Trim() : "";
@@ -46,7 +55,27 @@ namespace ChillKuGouPlaylist
             return 0;
         }
         static JObject Request(string path, Dictionary<string, string> extra, JObject body, string router, bool web, string host)
+        {return RequestCore(path,extra,body,router,web,host,true);}
+        static string VerificationEvent(JObject result,HttpWebResponse response)
         {
+            JObject data=result["data"] as JObject;
+            string value=response.Headers["ssa-code"] ?? Text(result["ssaCode"] ?? result["eventid"] ?? (data==null?null:data["eventid"]));
+            return System.Text.RegularExpressions.Regex.IsMatch(value??"","^[A-Za-z0-9_-]{8,256}$")?value:null;
+        }
+        static int ReadVerificationType(string eventId)
+        {
+            try
+            {
+                JObject result=RequestCore("/verifyservice/v3/get_verify_info",null,
+                    new JObject{{"eventid",eventId},{"userid",Number(account["userid"])},{"platid",2},{"rtype",1},{"wasm",1},{"i",""},{"sid",""},{"edt",""}},null,false,"https://gateway.kugou.com",false);
+                JObject data=result["data"] as JObject;long kind=Number(data==null?null:data["v_type"]);
+                return kind>0 && kind<1000?(int)kind:0;
+            }
+            catch(InvalidOperationException){return 0;}catch(JsonException){return 0;}
+        }
+        static JObject RequestCore(string path, Dictionary<string, string> extra, JObject body, string router, bool web, string host,bool readVerification)
+        {
+            if(!web && path!="/verifyservice/v3/get_verify_info" && RetryAfterSeconds>0)throw RequestIssue.Cooling(RetryAfterSeconds);
             var p = Params("dfid", "-", "mid", mid, "uuid", "-", "appid", AppId, "clientver", ClientVersion,
                 "clienttime", ((long)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString(CultureInfo.InvariantCulture));
             if (IsLoggedIn) { p["token"] = Text(account["token"]); p["userid"] = Text(account["userid"]); }
@@ -57,6 +86,7 @@ namespace ChillKuGouPlaylist
             string query = string.Join("&", p.Select(x => Uri.EscapeDataString(x.Key) + "=" + Uri.EscapeDataString(x.Value)).ToArray());
             for (int attempt = 0; ; attempt++)
             {
+                Throttle();
                 HttpWebRequest req = (HttpWebRequest)WebRequest.Create(host + path + "?" + query);
                 req.Method = body == null ? "GET" : "POST"; req.Timeout = 15000; req.ReadWriteTimeout = 15000; req.AllowAutoRedirect = false;
                 req.UserAgent = "Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi";
@@ -76,18 +106,25 @@ namespace ChillKuGouPlaylist
                         while ((count = input.Read(bytes, 0, bytes.Length)) > 0) { buffer.Write(bytes, 0, count); if (buffer.Length > 16 * 1024 * 1024) throw new InvalidOperationException("酷狗响应超过大小限制。"); }
                         JObject result = JObject.Parse(Encoding.UTF8.GetString(buffer.ToArray()));
                         if (Number(result["error_code"]) != 0 || Text(result["status"]) == "0")
-                            throw new InvalidOperationException("酷狗请求未通过（" + Number(result["error_code"]) + "），请重试或重新扫码登录。");
+                        {
+                            long code=Number(result["error_code"]);string eventId=code==20028?VerificationEvent(result,response):null;
+                            int kind=eventId!=null && readVerification?ReadVerificationType(eventId):0;
+                            throw Fail(RequestIssue.Api(code,path,eventId!=null,kind));
+                        }
                         return result;
                     }
                 }
                 catch (WebException ex)
                 {
+                    HttpWebResponse failedResponse=ex.Response as HttpWebResponse;
+                    if(failedResponse!=null && ((int)failedResponse.StatusCode==412 || (int)failedResponse.StatusCode==429))
+                    {int status=(int)failedResponse.StatusCode;failedResponse.Close();throw Fail(RequestIssue.Http(status,path));}
                     bool retry = body == null && attempt == 0 && NetworkErrors.CanRetry(ex);
                     string message = NetworkErrors.Describe(ex, req.RequestUri.Host);
                     if (ex.Response != null) ex.Response.Close();
                     if (retry) continue;
                     // Do not retain the original exception: it can contain a signed URL/token.
-                    throw new InvalidOperationException(message);
+                    throw RequestIssue.Network(message,path);
                 }
             }
         }

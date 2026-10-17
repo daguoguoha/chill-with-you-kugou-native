@@ -3,3 +3,5 @@
 **/cache/
 **/installer-tests-*/
 **/test-account/
+
+**/*FlowTests.exe

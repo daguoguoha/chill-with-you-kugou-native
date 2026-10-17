@@ -1,5 +1,5 @@
-# Network regression tests
+# Offline request handling tests
 
-Compile NetworkTests.cs together with source/Bridge.cs, source/Models.cs and source/NetworkErrors.cs, referencing System.Security.dll and the .NET 4.5 build of Newtonsoft.Json 13.0.3. Do not run the standalone test with the Unity/netstandard Newtonsoft.Json build.
+Compile RequestFlowTests.cs with ../source/RequestIssue.cs on Windows .NET Framework 4.x. For Bilibili also include ../source/DeviceCookies.cs and define BILI. Reference the official .NET 4.5 Newtonsoft.Json 13.0.3 DLL and place it next to the executable. These tests contain only synthetic values and do not load accounts, access DPAPI, contact a network, or install plugins. Keep compiled test binaries out of the package and repository.
 
-Run the test executable without arguments for loopback HTTP fault injection and TLS/error classification checks. Pass `live` for an actual QR generation/poll request against the official KuGou endpoint. No account is required; temporary device data is written to test-account beside the executable. The test never scans or prints a QR/login token. Keep this folder out of version control.
+Old smoke-test sources, where retained, document prior stable-release validation. They were not rerun for this candidate and should not be treated as evidence that this version passes real login or challenge flows. Current validation limits are in TESTING.md.
