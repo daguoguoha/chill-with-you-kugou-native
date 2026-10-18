@@ -65,7 +65,7 @@ function Get-Dependency($Dependency, [string]$Cache) {
     $bundled = Get-SafeChild (Join-Path $script:InstallRoot 'offline-dependencies') $Dependency.Name
     if (Test-Path -LiteralPath $bundled -PathType Leaf) {
         if ((Get-FileHash -LiteralPath $bundled -Algorithm SHA256).Hash -ne $Dependency.SHA256) {
-            throw ('内置依赖校验不通过：' + $Dependency.Name + '。请重新下载并完整解压 酷狗音乐 v1.0.2-rc.1 一键安装包。')
+            throw ('内置依赖校验不通过：' + $Dependency.Name + '。请重新下载并完整解压 酷狗音乐 v1.1.0 一键安装包。')
         }
         Write-InstallLog ('使用已校验的内置依赖 ' + $Dependency.Name) | Out-Host
         return $bundled
@@ -75,7 +75,7 @@ function Get-Dependency($Dependency, [string]$Cache) {
         Write-InstallLog ('使用已校验的本地缓存 ' + $Dependency.Name) | Out-Host
         return $target
     }
-    throw ('缺少离线依赖：' + $Dependency.Name + '。请完整解压 Release 中的 ChillKuGouNative-1.0.2-rc.1-OneClick.zip；不要单独复制安装器。下载：https://github.com/daguoguoha/chill-with-you-bilibili-native/releases/latest')
+    throw ('缺少离线依赖：' + $Dependency.Name + '。请完整解压 Release 中的 ChillKuGouNative-1.1.0-OneClick.zip；不要单独复制安装器。下载：https://github.com/daguoguoha/chill-with-you-bilibili-native/releases/latest')
 }
 function Expand-SafeZip([string]$Archive, [string]$Destination) {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -103,8 +103,8 @@ function Invoke-Installation([string]$Path) {
     }
     if (Test-Path -LiteralPath (Get-SafeChild $root 'BepInEx\plugins\ChillPatcher\ChillPatcher.dll')) { throw '发现完整 ChillPatcher 插件。请先停用它，避免两个插件同时接管播放器。' }
     $payload = Join-Path $script:InstallRoot 'BepInEx\plugins\ChillKuGouPlaylist\ChillKuGouPlaylist.dll'
-    if (-not (Test-Path -LiteralPath $payload) -or (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash -ne 'A5D8FB8876653048FB6D405F6C0ED23FAA705980EBF9DA4BC54854A51BB22CC0') { throw '主插件文件缺失或校验失败，请重新解压原始安装包。' }
-    $cache = Join-Path ([IO.Path]::GetTempPath()) 'ChillKuGouNative-1.0.2-rc.1-downloads'
+    if (-not (Test-Path -LiteralPath $payload) -or (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash -ne '4C895490B0C9278CA19C6BE1FA30DFB68571BEDD03109F5FB587649401AEEC70') { throw '主插件文件缺失或校验失败，请重新解压原始安装包。' }
+    $cache = Join-Path ([IO.Path]::GetTempPath()) 'ChillKuGouNative-1.1.0-downloads'
     New-Item -ItemType Directory -Path $cache -Force | Out-Null
     $stage = Join-Path $cache ([Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage | Out-Null
@@ -175,7 +175,7 @@ function Invoke-Installation([string]$Path) {
     }
 }
 if ($VerifyDownloadsOnly) {
-    $cache = Join-Path ([IO.Path]::GetTempPath()) 'ChillKuGouNative-1.0.2-rc.1-downloads'
+    $cache = Join-Path ([IO.Path]::GetTempPath()) 'ChillKuGouNative-1.1.0-downloads'
     New-Item -ItemType Directory -Path $cache -Force | Out-Null
     foreach ($dependency in $script:Dependencies) { [void](Get-Dependency $dependency $cache) }
     Write-Output '三个内置依赖 SHA256 校验通过。'

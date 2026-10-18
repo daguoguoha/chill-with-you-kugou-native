@@ -13,7 +13,7 @@ using Newtonsoft.Json.Linq;
 
 namespace ChillKuGouPlaylist
 {
-    public static class Bridge
+    public static partial class Bridge
     {
         const string AppId = "1005", ClientVersion = "20489";
         static string directory, mid, qrKey;

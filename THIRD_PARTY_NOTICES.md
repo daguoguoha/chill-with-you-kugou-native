@@ -14,3 +14,5 @@
 本候选版沿用 B站版本的离线安装器，BepInEx 5.4.23.5 官方 ZIP 内含 Harmony/HarmonyX、Mono.Cecil 0.10.4、MonoMod 22.1.29.1；MIT 许可见 licenses/。其中 UnityDoorstop 4.5.0 为 LGPL-2.1-or-later，未修改的动态库可独立更换或移除，完整上游源码及来源哈希见 native-source/UnityDoorstop-4.5.0-source.zip 与相邻 JSON，许可见 licenses/UnityDoorstop-LICENSE.txt。
 
 二次验证类型元数据流程参考 KuGouMusicApi 的 get_verify_info 实现和 [上游 issue 206](https://github.com/MakcRe/KuGouMusicApi/issues/206)；本版没有复制验证码 WASM、没有自动化解题，也没有实现实际验证提交。
+
+真实播放记录兼容性实现的协议来源见 PLAYBACK_REPORTING.md；没有复制或分发平台网页播放器的整份代码或美术资源。

@@ -1,1 +1,1 @@
-0bb392817677143433b0f95478b034b4c49a71821e0fb2483c87c4e7cec338d8  ChillKuGouNative-1.0.2-rc.1-OneClick.zip
+b61df0d8fc82d2ff9204bc64e83a4b417a97ec186a6bdd38a4a6c6a4942e1dad  ChillKuGouNative-1.1.0-OneClick.zip
