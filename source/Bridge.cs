@@ -54,8 +54,8 @@ namespace ChillKuGouPlaylist
             }
             return 0;
         }
-        static JObject Request(string path, Dictionary<string, string> extra, JObject body, string router, bool web, string host)
-        {return RequestCore(path,extra,body,router,web,host,true);}
+        static JObject Request(string path, Dictionary<string, string> extra, JObject body, string router, bool web, string host, bool post=false)
+        {return RequestCore(path,extra,body,router,web,host,true,post);}
         static string VerificationEvent(JObject result,HttpWebResponse response)
         {
             JObject data=result["data"] as JObject;
@@ -73,7 +73,7 @@ namespace ChillKuGouPlaylist
             }
             catch(InvalidOperationException){return 0;}catch(JsonException){return 0;}
         }
-        static JObject RequestCore(string path, Dictionary<string, string> extra, JObject body, string router, bool web, string host,bool readVerification)
+        static JObject RequestCore(string path, Dictionary<string, string> extra, JObject body, string router, bool web, string host,bool readVerification,bool post=false)
         {
             if(!web && path!="/verifyservice/v3/get_verify_info" && RetryAfterSeconds>0)throw RequestIssue.Cooling(RetryAfterSeconds);
             var p = Params("dfid", "-", "mid", mid, "uuid", "-", "appid", AppId, "clientver", ClientVersion,
@@ -88,7 +88,7 @@ namespace ChillKuGouPlaylist
             {
                 Throttle();
                 HttpWebRequest req = (HttpWebRequest)WebRequest.Create(host + path + "?" + query);
-                req.Method = body == null ? "GET" : "POST"; req.Timeout = 15000; req.ReadWriteTimeout = 15000; req.AllowAutoRedirect = false;
+                req.Method = body == null && !post ? "GET" : "POST"; req.Timeout = 15000; req.ReadWriteTimeout = 15000; req.AllowAutoRedirect = false;
                 req.UserAgent = "Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi";
                 req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
                 req.Headers["mid"] = mid; req.Headers["dfid"] = "-"; req.Headers["clienttime"] = p["clienttime"];
@@ -119,24 +119,25 @@ namespace ChillKuGouPlaylist
                     HttpWebResponse failedResponse=ex.Response as HttpWebResponse;
                     if(failedResponse!=null && ((int)failedResponse.StatusCode==412 || (int)failedResponse.StatusCode==429))
                     {int status=(int)failedResponse.StatusCode;failedResponse.Close();throw Fail(RequestIssue.Http(status,path));}
-                    bool retry = body == null && attempt == 0 && NetworkErrors.CanRetry(ex);
+                    bool transient=NetworkErrors.CanRetry(ex);
+                    bool retry = body == null && attempt == 0 && transient;
                     string message = NetworkErrors.Describe(ex, req.RequestUri.Host);
                     if (ex.Response != null) ex.Response.Close();
                     if (retry) continue;
                     // Do not retain the original exception: it can contain a signed URL/token.
-                    throw RequestIssue.Network(message,path);
+                    throw RequestIssue.Network(message,path,transient);
                 }
             }
         }
-        static JObject Api(string path, Dictionary<string, string> p, JObject data, string router)
-        { return Request(path, p, data, router, false, "https://gateway.kugou.com"); }
+        static JObject Api(string path, Dictionary<string, string> p, JObject data, string router,bool post=false)
+        { return Request(path, p, data, router, false, "https://gateway.kugou.com",post); }
         public static void CancelQr() { qrKey = null; }
         public static string QrImage(string ignored)
         {
             JObject r = Request("/v2/qrcode", Params("appid", "1001", "type", "1", "plat", "4", "qrcode_txt", "https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=1005&", "srcappid", "2919"), null, null, true, "https://login-user.kugou.com");
             qrKey = Text(r["data"]["qrcode"]);
             string image = Text(r["data"]["qrcode_img"]);
-            if (qrKey.Length < 10 || !image.StartsWith("data:image/png;base64,", StringComparison.Ordinal)) throw new InvalidOperationException("酷狗未返回有效二维码。");
+            if (qrKey.Length < 10 || qrKey.Length>512 || !image.StartsWith("data:image/png;base64,", StringComparison.Ordinal)) throw new InvalidOperationException("酷狗未返回有效二维码。");
             return image.Substring("data:image/png;base64,".Length);
         }
         public static string CheckQr()
@@ -219,6 +220,7 @@ namespace ChillKuGouPlaylist
                     if (artists.Count == 0 && dash > 0) artists.Add(filename.Substring(0, dash));
                     double seconds = Number(row["timelen"]) / 1000.0; if (seconds <= 0) seconds = Number(row["duration"]);
                     Song song = new Song { id = key, hash = hash.ToLowerInvariant(), albumId = album.Length == 0 ? "0" : album, albumAudioId = albumAudio, name = title, artists = artists, duration = seconds };
+                    song.fileId=Number(row["fileid"]);
                     if (seen.Add(key)) result.Add(song);
                 }
                 if ((total > 0 && received >= total) || rows.Count == 0 || (total <= 0 && rows.Count < 100))
@@ -230,17 +232,23 @@ namespace ChillKuGouPlaylist
             }
             throw new InvalidOperationException("歌单超过 10000 首，暂不支持。");
         }
+        sealed class QualityUnavailable : InvalidOperationException { }
         public static string SongURL(string id)
+        {
+            try { return SongURLQuality(id, "320"); }
+            catch (QualityUnavailable) { return SongURLQuality(id, "128"); }
+        }
+        static string SongURLQuality(string id, string quality)
         {
             Song song; if (!knownSongs.TryGetValue(id, out song)) throw new InvalidOperationException("请重新载入歌单。");
             string uid = IsLoggedIn ? Text(account["userid"]) : "0";
-            var p = Params("album_id", song.albumId, "area_code", "1", "hash", song.hash, "ssa_flag", "is_fromtrack", "version", "11430", "page_id", "151369488", "quality", "128", "album_audio_id", song.albumAudioId.ToString(), "behavior", "play", "pid", "2", "cmd", "26", "pidversion", "3001", "IsFreePart", "0", "ppage_id", "463467626,350369493,788954147", "cdnBackup", "1", "module", "", "clientver", "11430", "key", Md5(song.hash + "57ae12eb6890223e355ccfcb74edf70d" + AppId + mid + uid));
+            var p = Params("album_id", song.albumId, "area_code", "1", "hash", song.hash, "ssa_flag", "is_fromtrack", "version", "11430", "page_id", "151369488", "quality", quality, "album_audio_id", song.albumAudioId.ToString(), "behavior", "play", "pid", "2", "cmd", "26", "pidversion", "3001", "IsFreePart", "0", "ppage_id", "463467626,350369493,788954147", "cdnBackup", "1", "module", "", "clientver", "11430", "key", Md5(song.hash + "57ae12eb6890223e355ccfcb74edf70d" + AppId + mid + uid));
             JObject r = Api("/v5/url", p, null, "trackercdn.kugou.com");
             JArray urls = r["url"] as JArray;
             string url = urls == null ? Text(r["url"]) : urls.Select(Text).FirstOrDefault(Rules.IsMusicUrl);
-            if (!Rules.IsMusicUrl(url)) throw new InvalidOperationException("此歌曲暂无可用音源，请确认账号权限。");
+            if (!Rules.IsMusicUrl(url)) throw new QualityUnavailable();
             double length = Number(r["timeLength"]);
-            if (song.duration > 60 && length > 0 && length + 8 < song.duration) throw new InvalidOperationException("此歌曲仅返回试听片段，请确认账号权限。");
+            if (song.duration > 60 && length > 0 && length + 8 < song.duration) throw new QualityUnavailable();
             return JsonConvert.SerializeObject(new SongUrl { url = url, type = Text(r["extName"]), size = Number(r["fileSize"]) });
         }
     }
