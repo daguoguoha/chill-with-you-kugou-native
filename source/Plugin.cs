@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -15,7 +15,7 @@ using UnityEngine.Networking;
 
 namespace ChillKuGouPlaylist
 {
-    [BepInPlugin("local.chill.kugouplaylist", "酷狗音乐歌单", "1.2.0")]
+    [BepInPlugin("local.chill.kugouplaylist", "酷狗音乐歌单", "1.3.3")]
     [BepInProcess("Chill With You.exe")]
     public sealed partial class Plugin : BaseUnityPlugin
     {
@@ -46,6 +46,7 @@ namespace ChillKuGouPlaylist
         void Awake()
         {
             Instance = this;
+            Task.Factory.StartNew(delegate { AudioTemporaryFiles.Cleanup(Path.GetTempPath()); });
             // This game changes scenes immediately after the BepInEx bootstrap.
             // Keep the plugin and its callbacks outside scene-owned objects.
             gameObject.hideFlags = HideFlags.HideAndDontSave;
@@ -92,11 +93,13 @@ namespace ChillKuGouPlaylist
         void Run(Func<object> action, Action<object> done)
         {
             if (busy || destroying) return;
-            busy = true; onDone = done;
+            busy = true; onDone = done; qrPendingPoll = false;
             job = Task.Factory.StartNew(delegate { lock (nativeGate) { return action(); } });
         }
         internal void Tick()
         {
+            FavoritesTick();
+            NativeFavoriteTick();
             LyricsTickSafe();
             PlaybackSessionTickSafe();
             ListeningTickSafe();
@@ -135,23 +138,28 @@ namespace ChillKuGouPlaylist
             if (job != null && job.IsCompleted)
             {
                 Task<object> finished = job; Action<object> done = onDone;
+                bool wasQrPoll=qrPendingPoll;qrPendingPoll=false;
                 job = null; onDone = null; busy = false;
                 if (finished.IsFaulted)
-                { HandleRequestFailure(finished.Exception.GetBaseException()); }
-                else if (!finished.IsCanceled) { try { done(finished.Result); } catch (Exception ex) { status = "处理响应失败，请重试。"; Logger.LogWarning(ex.GetType().Name); } }
+                { var error=finished.Exception.GetBaseException();if(!RecoverQrPoll(error,wasQrPoll))HandleRequestFailure(error); }
+                else if (!finished.IsCanceled) { try { done(finished.Result); } catch (Exception ex) { if(wasQrPoll){qrPolling=false;ClearQr();}status = "处理响应失败，请重试。"; Logger.LogWarning(ex.GetType().Name); } }
             }
+            ExpireQrPolling();
             if (ready && qrPolling && !busy && Time.realtimeSinceStartup >= nextPoll)
             {
                 nextPoll = Time.realtimeSinceStartup + 3;
                 Run(delegate { return JsonConvert.DeserializeObject<QrState>(Bridge.CheckQr()); }, delegate(object result)
                 {
                     QrState qr = (QrState)result;
+                    if(qr==null)throw new InvalidOperationException("扫码响应无效。");
+                    qrPollFailures=0;
                     if (qr.code == 0 && Bridge.IsLoggedIn)
                     { qrPolling = false; logged = true; listeningSwitchingAccount = false; ClearQr(); LoadAccount(); }
                     else if (qr.code == 65) { qrPolling = false; status = "二维码已过期，请重新生成。"; ClearQr(); }
                     else if (qr.code != 66 && qr.code != 67) { qrPolling = false; status = "登录未完成，请重新扫码。"; ClearQr(); }
                     else status = qr.code == 67 ? "已扫码，请在手机上确认登录。" : "请使用酷狗音乐 App 扫一扫。";
                 });
+                qrPendingPoll=busy;
             }
             if (playing && !paused && !audio.isPlaying && audio.clip != null && !busy && request == null)
             { playing = false; Next(1); }
@@ -159,6 +167,8 @@ namespace ChillKuGouPlaylist
         void ClearQr() { if (qrImage != null) Destroy(qrImage); qrImage = null; }
         void Login()
         {
+            if(!ready || busy || destroying)return;
+            ResetFavorites();
             ResetPlaybackSessionAccount();
             ResetListeningAccount();
             requestIssue=null; qrPolling = false; ClearQr();
@@ -170,6 +180,7 @@ namespace ChillKuGouPlaylist
                 qrImage = new Texture2D(2, 2, TextureFormat.RGBA32, false);
                 if (!qrImage.LoadImage(png)) { ClearQr(); throw new InvalidOperationException("二维码图片无效。"); }
                 qrImage.filterMode = FilterMode.Point;
+                qrPollFailures=0;qrDeadline=Time.realtimeSinceStartup+180;
                 qrPolling = true; nextPoll = Time.realtimeSinceStartup + 3;
                 status = "请使用酷狗音乐 App 扫码，并在手机确认登录。";
             });
@@ -188,10 +199,11 @@ namespace ChillKuGouPlaylist
                 UserPlaylists page = JsonConvert.DeserializeObject<UserPlaylists>(Bridge.UserPlaylists());
                 return Rules.MergePlaylists(page);
             }, delegate(object result)
-            { playlists = (List<Playlist>)result; nativeMenuVersion = -1; status = "已读取 " + playlists.Count + " 个歌单，选择左侧歌单。"; });
+            { playlists = (List<Playlist>)result; playlists.RemoveAll(p => p.id == RecommendationId); playlists.Insert(0, new Playlist { id = RecommendationId, name = RecommendationTitle }); RefreshFavorites(); nativeMenuVersion = -1; nativeMenuVersion = -1; status = "已读取 " + playlists.Count + " 个歌单，选择左侧歌单。"; });
         }
         void OpenPlaylist(string id, string title)
         {
+            if (id == RecommendationId) { OpenRecommendations(); return; }
             status = "正在读取歌单「" + title + "」…";
             Run(delegate { return Bridge.Playlist(id); }, delegate(object result)
             { songs = Rules.UniqueSongs((List<Song>)result); selectedPlaylistId = id; selectedPlaylistTitle = title; query = ""; songScroll = Vector2.zero; showImport = false;
@@ -224,13 +236,14 @@ namespace ChillKuGouPlaylist
         }
         void OnDestroy()
         {
+            CloseNativeFavorite();
             ClosePlaybackSession();
             CloseLyrics();
             CloseListening();
             Logger.LogInfo("酷狗音乐插件对象已销毁。");
             destroying = true; qrPolling = false;
             StopExternal(); ClearQr();
-            foreach (var item in nativeClips) if (item.AudioClip != null) Destroy(item.AudioClip);
+            CloseAudioCache();
             foreach (var button in nativeButtons) if (button != null) Destroy(button);
             DisposeUI();
             if (harmony != null) harmony.UnpatchSelf();
